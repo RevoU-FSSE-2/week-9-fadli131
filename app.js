@@ -78,7 +78,7 @@ app.get('/karyawan/:id', async (request, response) => {
             (SELECT SUM(t.amount)
                 FROM transaksi t
                 WHERE t.type = "expense" AND t.user_id = ?) AS expense
-        FROM Karyawan AS u
+        FROM karyawan AS u
         WHERE u.id = ?
         GROUP BY u.id`, [id, id, id, id]);
 
@@ -86,7 +86,7 @@ app.get('/karyawan/:id', async (request, response) => {
             console.log("Transaksi Connected", queryResult);
             response.status(200).json(commonResponse(queryResult[0], null));
         } else {
-            response.status(404).json(commonResponse(null, "Karyawan ID is not found"));
+            response.status(404).json(commonResponse(null, "karyawan ID is not found"));
         }
     } catch (err) {
         console.error(err);

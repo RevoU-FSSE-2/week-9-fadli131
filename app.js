@@ -11,10 +11,11 @@ const port = 3003;
 app.use(bodyParser.json());
 
 const db = mysql.createConnection({
-    host: 'localhost',
+    host: 'containers-us-west-194.railway.app',
+    port: '7564',
     user: 'root',
-    password: '',
-    database: 'week9'
+    password: '73HcEVAGlBkbr78Wiy0y',
+    database: 'railway'
 });
 
 db.connect((err) => {
@@ -53,7 +54,7 @@ const commonResponse = (data, errorMessage) => {
 };
 
 app.get('/karyawan', (request, response) => {
-    db.query("select * from week9.karyawan", (err, result, fields) => {
+    db.query("select * from karyawan", (err, result, fields) => {
         if (err) {
             console.error(err);
             response.status(500).json(commonResponse(null, "server error"));

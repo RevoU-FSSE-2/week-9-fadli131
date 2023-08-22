@@ -2,10 +2,13 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const mysql = require('mysql2');
 const redis = require('redis');
+const redisClient = redis.createClient();
 require('dotenv').config();
 
 const app = express();
-const port = 3000;
+const port = 3003;
+
+app.use(bodyParser.json());
 
 const db = mysql.createConnection({
     host: 'localhost',
@@ -14,153 +17,147 @@ const db = mysql.createConnection({
     database: 'week9'
 });
 
-db.connect((err) =>{
-    if(err){
+db.connect((err) => {
+    if (err) {
         console.log('Error connecting to the DB' + err);
         return;
     }
-
-    console.log('connected')
+    console.log('Connected to the database');
 });
 
-const connection = mysql.createConnection({
-    host: 'localhost', 
-    user: 'root', 
-    password: '',
-    database: 'week9' 
+redisClient.on('error', (err) => {
+    console.error('Error connecting to Redis:', err);
+});
+
+redisClient.on('connect', () => {
+    console.log('Connected to Redis');
 });
 
 const query = (query, values) => {
     return new Promise((resolve, reject) => {
-        mysqlCon.query(query, values, (err, result, fields) => {
+        db.query(query, values, (err, result, fields) => {
             if (err) {
-                reject(err)
+                reject(err);
             } else {
-                resolve(result)
+                resolve(result);
             }
         });
     });
-}
+};
 
-const redisClient = redis.createClient();
-
-app.use(bodyParser.json());
+const commonResponse = (data, errorMessage) => {
+    return {
+        data: data,
+        error: errorMessage
+    };
+};
 
 app.get('/karyawan', (request, response) => {
-    mysqlCon.query("select * from week9.karyawan", (err, result, fields) => {
+    db.query("select * from week9.karyawan", (err, result, fields) => {
         if (err) {
-            console.error(err)
-            response.status(500).json(commonResponse(null, "server error"))
-            response.end()
-            return
+            console.error(err);
+            response.status(500).json(commonResponse(null, "server error"));
+            return;
         }
-
-        response.status(200).json(commonResponse(result, null))
-        response.end()
-    })
-})
+        response.status(200).json(commonResponse(result, null));
+    });
+});
 
 app.get('/karyawan/:id', async (request, response) => {
     try {
-        const id = request.params.id
-        const userKey = "user:" + id
-        const cacheData = await redisCon.hgetall(userKey)
+        const id = request.params.id;
 
-        if (Object.keys(cacheData).length !== 0) {
-            console.log("get data from cache")
-            response.status(200).json(commonResponse(cacheData, null))
-            response.end()
-            return
+        const queryResult = await query(`
+        SELECT u.id, u.name, u.address,
+            (SELECT SUM(t.amount) - (SELECT SUM(t.amount)
+                FROM transaksi t
+                WHERE t.type = "expense" AND t.user_id = ?)
+            FROM transaksi t
+            WHERE t.type = "income" AND t.user_id = ?) AS balance,
+            (SELECT SUM(t.amount)
+                FROM transaksi t
+                WHERE t.type = "expense" AND t.user_id = ?) AS expense
+        FROM Karyawan AS u
+        WHERE u.id = ?
+        GROUP BY u.id`, [id, id, id, id]);
+
+        if (queryResult.length > 0) {
+            console.log("Transaksi Connected", queryResult);
+            response.status(200).json(commonResponse(queryResult[0], null));
+        } else {
+            response.status(404).json(commonResponse(null, "Karyawan ID is not found"));
         }
-
-        const dbData = await query(`select
-                p.id,
-                p.name,
-                p.address,
-                sum(o.price) as amount
-            from
-                revou.person as p
-                left join week9.karyawan as o on p.id = o.karyawan_id
-            where
-                p.id = ?
-            group by
-                p.id`, id)
-
-        await redisCon.hset(userKey, dbData[0])
-        await redisCon.expire(userKey, 20);
-
-        response.status(200).json(commonResponse(dbData[0], null))
-        response.end()
     } catch (err) {
-        console.error(err)
-        response.status(500).json(commonResponse(null, "server error"))
-        response.end()
-        return
+        console.error(err);
+        response.status(500).json(commonResponse(null, "server error"));
     }
-
-})
-
-app.post('/karyawan', (request, response) => {
-
-})
+});
 
 app.post('/transaksi', async (request, response) => {
-    try {
-        const body = request.body
+    const body = request.body
 
-        const dbData = await query(`insert into
-            week9.karyawan (karyawan_id, type, product)
-        values
-        (?, ?, ?)`, [body.user_id, body.price, body.product])
-
-        const userId = body.user_id
-        const userKey = "user:" + userId
-        await redisCon.del(userKey)
-
-        response.status(200).json(commonResponse({
-            id: dbData.insertId
-        }, null))
-        response.end()
-
-    } catch (err) {
-        console.error(err)
-        response.status(500).json(commonResponse(null, "server error"))
-        response.end()
-        return
-    }
+    db.query(`
+    insert into
+    transaksi (user_id, type, amount)
+    values(?, ?, ?)`,
+        [body.user_id, body.type, body.amount], (err, result, fields) => {
+            if (err) {
+                console.error(err)
+                response.status(500).json(commonResponse(null, "Server error"))
+                response.end
+                return
+            }
+            response.status(200).json(commonResponse({ id: result.insertId }, null))
+            response.end
+        })
 })
+
+app.put('/transaksi/:id', (request, response) => {
+    const id = request.params.id;
+    const { type, amount, user_id } = request.body;
+
+    db.query(
+        `UPDATE transaksi
+        SET user_id=?, type=?, amount=?
+        WHERE id=?`, [user_id, type, amount, id],
+        (err, result, fields) => {
+            if (err) {
+                console.error(err);
+                response.status(500).json(commonResponse(null, "Server error"));
+                return;
+            }
+            console.log("Transaction updated", result);
+            response.status(200).json(commonResponse({ id: id }, null));
+        }
+    );
+});
 
 app.delete('/transaksi/:id', async (request, response) => {
     try {
-        const id = request.params.id
-        const data = await query("select karyawan_id from revou.order where id = ?", id)
-        if (Object.keys(data).length === 0) {
-            response.status(404).json(commonResponse(null, "data not found"))
-            response.end()
-            return
+        const id = request.params.id;
+        const transaksiData = await query("SELECT * FROM transaksi WHERE id = ?", [id]);
+
+        if (transaksiData && transaksiData.length === 0) {
+            response.status(404).json(commonResponse(null, "Transaksi data not found"));
+            return;
         }
-        const karyawanId = data[0].karyawan_id
-        const userKey = "user:" + karyawanId
-        await query("delete from week9.karyawan where id = ?", id)
-        await redisCon.del(userKey)
+
+        await query("DELETE FROM transaksi WHERE id = ?", [id]);
+        
+        const transaksiId = transaksiData[0].id; 
+        const userKey = "user:" + transaksiId; 
+        redisClient.del(userKey);
 
         response.status(200).json(commonResponse({
             id: id
-        }))
-
-        response.end()
+        }));
 
     } catch (err) {
-        console.error(err)
-        response.status(500).json(commonResponse(null, "server error"))
-        response.end()
-        return
+        console.error(err);
+        response.status(500).json(commonResponse(null, "server error"));
     }
-})
+});
 
 app.listen(port, () => {
-    console.log(`Server berjalan di 
-  http://localhost/
-  :${port}`);
-  }); 
-
+    console.log(`Server is running at http://localhost:${port}`);
+});

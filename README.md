@@ -9,7 +9,7 @@ Simple CRUD
 👤 **Fadli Aryadinata**
 
 - GitHub: [@fadli131](https://github.com/fadli131)
-- Deployment Link (https://p3000-zc4992c25-zc745b1d8-gtw.zb20e5e48.qovery.fr/api/products)
+- Deployment Link (https://week9-fadli.cyclic.cloud/karyawan)
 
 ### Getting Started
 
